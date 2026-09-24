@@ -1,0 +1,17 @@
+{
+  "payload_size_bytes": 2090,
+  "redis": {
+    "backend": "Redis 7",
+    "reported_used_memory_mb": 251.94,
+    "net_memory_mb": 250.51,
+    "overhead_per_key_bytes": 536.78,
+    "total_bytes_per_key": 2626.78
+  },
+  "memcached": {
+    "backend": "Memcached 1.6",
+    "reported_used_memory_mb": 206.46,
+    "net_memory_mb": 206.46,
+    "overhead_per_key_bytes": 74.86,
+    "total_bytes_per_key": 2164.86
+  }
+}

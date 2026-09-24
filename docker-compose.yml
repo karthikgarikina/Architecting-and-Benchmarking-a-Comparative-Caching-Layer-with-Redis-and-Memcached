@@ -1,0 +1,92 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: caching-db
+    environment:
+      POSTGRES_USER: catalog_user
+      POSTGRES_PASSWORD: catalog_pass
+      POSTGRES_DB: catalog_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init_db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog_user -d catalog_db && psql -U catalog_user -d catalog_db -tAc 'SELECT count(*) >= 100000 FROM products;' | grep -q 't'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    networks:
+      - caching-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: caching-redis
+    command: redis-server --appendonly no --save "" --maxmemory 512mb --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    networks:
+      - caching-network
+
+  memcached:
+    image: memcached:1.6-alpine
+    container_name: caching-memcached
+    command: -m 512 -c 2048 -t 4
+    ports:
+      - "11211:11211"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'version' | nc 127.0.0.1 11211 | grep -q 'VERSION' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    networks:
+      - caching-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caching-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      API_PORT: 8000
+      REDIS_URL: redis://redis:6379/0
+      MEMCACHED_URL: memcached:11211
+      DATABASE_URL: postgresql://catalog_user:catalog_pass@db:5432/catalog_db
+      DEFAULT_CACHE_BACKEND: redis
+      RATE_LIMIT_MAX_REQUESTS: 100
+      RATE_LIMIT_WINDOW_SECONDS: 60
+      PRODUCT_CACHE_TTL: 300
+      SESSION_CACHE_TTL: 86400
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      memcached:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+    networks:
+      - caching-network
+
+networks:
+  caching-network:
+    name: caching-network
+
+volumes:
+  pgdata:
