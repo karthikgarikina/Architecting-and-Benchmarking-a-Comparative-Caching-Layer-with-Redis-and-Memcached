@@ -13,6 +13,17 @@ logger = logging.getLogger("consistency_test")
 BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 RESULTS_DIR = os.getenv("RESULTS_DIR", "results")
 
+async def get_views(client: httpx.AsyncClient, product_id: int, backend: str) -> int:
+    headers = {"X-Cache-Backend": backend}
+    resp = await client.get(f"{BASE_URL}/products/{product_id}/views", headers=headers, timeout=10.0)
+    if resp.status_code == 200:
+        return resp.json().get("views", 0)
+    return 0
+
+async def reset_leaderboard(client: httpx.AsyncClient, backend: str):
+    headers = {"X-Cache-Backend": backend}
+    await client.post(f"{BASE_URL}/leaderboard/reset", headers=headers, timeout=10.0)
+
 async def run_concurrent_increments(
     client: httpx.AsyncClient,
     product_id: int,
@@ -23,6 +34,8 @@ async def run_concurrent_increments(
 ) -> int:
     headers = {"X-Cache-Backend": backend}
     params = {"no_lock": "true"} if no_lock else {}
+
+    initial_views = await get_views(client, product_id, backend)
 
     async def worker():
         for _ in range(increments_per_worker):
@@ -40,13 +53,10 @@ async def run_concurrent_increments(
     tasks = [asyncio.create_task(worker()) for _ in range(num_workers)]
     await asyncio.gather(*tasks)
 
-    # Fetch leaderboard to check final count
-    resp = await client.get(f"{BASE_URL}/leaderboard?limit=100", headers=headers, timeout=10.0)
-    data = resp.json()
-    for item in data.get("top_products", []):
-        if item["product_id"] == product_id:
-            return item["views"]
-    return 0
+    final_views = await get_views(client, product_id, backend)
+    # The actual increments registered
+    recorded_increments = final_views - initial_views
+    return recorded_increments
 
 async def test_rate_limiter(client: httpx.AsyncClient, backend: str, user_id: str, total_requests: int = 105):
     logger.info("Testing Rate Limiter for %s with %d rapid requests...", backend, total_requests)
@@ -88,10 +98,14 @@ async def main():
         num_workers = 10
         inc_per_worker = 100
 
+        # Reset leaderboards to clean slate
+        await reset_leaderboard(client, "redis")
+        await reset_leaderboard(client, "memcached")
+
         # Test 1: Redis Leaderboard Atomic Increments
         logger.info("--- Test 1: Redis Leaderboard Concurrent Increments (10 workers x 100 increments) ---")
         redis_product_id = 99901
-        redis_final = await run_concurrent_increments(
+        redis_recorded = await run_concurrent_increments(
             client=client,
             product_id=redis_product_id,
             backend="redis",
@@ -99,14 +113,14 @@ async def main():
             num_workers=num_workers,
             increments_per_worker=inc_per_worker
         )
-        redis_lost = total_expected - redis_final
-        logger.info("Redis: Expected = %d, Final = %d, Lost = %d", total_expected, redis_final, redis_lost)
-        assert redis_final == total_expected, f"Redis failed consistency: {redis_final} != {total_expected}"
+        redis_lost = total_expected - redis_recorded
+        logger.info("Redis: Expected = %d, Recorded = %d, Lost = %d", total_expected, redis_recorded, redis_lost)
+        assert redis_recorded == total_expected, f"Redis failed consistency: {redis_recorded} != {total_expected}"
 
         # Test 2: Memcached Leaderboard WITH Distributed Lock
         logger.info("--- Test 2: Memcached Leaderboard WITH Distributed Lock (10 workers x 100 increments) ---")
         memcached_locked_product_id = 99902
-        memcached_locked_final = await run_concurrent_increments(
+        memcached_locked_recorded = await run_concurrent_increments(
             client=client,
             product_id=memcached_locked_product_id,
             backend="memcached",
@@ -114,14 +128,14 @@ async def main():
             num_workers=num_workers,
             increments_per_worker=inc_per_worker
         )
-        memcached_lost_with_lock = total_expected - memcached_locked_final
-        logger.info("Memcached (With Lock): Expected = %d, Final = %d, Lost = %d", total_expected, memcached_locked_final, memcached_lost_with_lock)
-        assert memcached_locked_final == total_expected, f"Memcached with lock failed: {memcached_locked_final} != {total_expected}"
+        memcached_lost_with_lock = total_expected - memcached_locked_recorded
+        logger.info("Memcached (With Lock): Expected = %d, Recorded = %d, Lost = %d", total_expected, memcached_locked_recorded, memcached_lost_with_lock)
+        assert memcached_locked_recorded == total_expected, f"Memcached with lock failed: {memcached_locked_recorded} != {total_expected}"
 
         # Test 3: Memcached Leaderboard WITHOUT Distributed Lock
         logger.info("--- Test 3: Memcached Leaderboard WITHOUT Lock (Naive Get-Modify-Set Race Condition) ---")
         memcached_nolock_product_id = 99903
-        memcached_nolock_final = await run_concurrent_increments(
+        memcached_nolock_recorded = await run_concurrent_increments(
             client=client,
             product_id=memcached_nolock_product_id,
             backend="memcached",
@@ -129,9 +143,9 @@ async def main():
             num_workers=num_workers,
             increments_per_worker=inc_per_worker
         )
-        memcached_lost_no_lock = total_expected - memcached_nolock_final
-        logger.info("Memcached (No Lock): Expected = %d, Final = %d, Lost = %d (Race Deficit demonstrated!)",
-                    total_expected, memcached_nolock_final, memcached_lost_no_lock)
+        memcached_lost_no_lock = total_expected - memcached_nolock_recorded
+        logger.info("Memcached (No Lock): Expected = %d, Recorded = %d, Lost = %d (Race Deficit demonstrated!)",
+                    total_expected, memcached_nolock_recorded, memcached_lost_no_lock)
         assert memcached_lost_no_lock > 0, "Memcached without lock should exhibit lost updates under high concurrency"
 
         # Test 4: Rate Limiter (Redis)
@@ -148,7 +162,7 @@ async def main():
 
         consistency_summary = {
             "total_sent_increments": total_expected,
-            "redis_final_score": redis_final,
+            "redis_final_score": redis_recorded,
             "redis_lost_increments": redis_lost,
             "memcached_lost_increments_with_lock": memcached_lost_with_lock,
             "memcached_lost_increments_no_lock": memcached_lost_no_lock,

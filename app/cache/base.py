@@ -28,6 +28,16 @@ class BaseCacheBackend(ABC):
         pass
 
     @abstractmethod
+    async def get_product_views(self, product_id: int) -> int:
+        """Get exact view count for a single product."""
+        pass
+
+    @abstractmethod
+    async def reset_leaderboard(self) -> bool:
+        """Reset leaderboard view counts."""
+        pass
+
+    @abstractmethod
     async def check_rate_limit(self, user_id: str, limit: int = 100, window: int = 60) -> Tuple[bool, int]:
         """
         Check rate limit.

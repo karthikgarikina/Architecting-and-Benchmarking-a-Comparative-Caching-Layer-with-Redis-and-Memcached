@@ -196,17 +196,36 @@ docker exec caching-app python -c "import socket; s = socket.socket(); s.connect
 ```
 
 ### 4. Running the Automated Consistency Test
-The script `app/scripts/test_consistency.py` verifies:
-- Redis atomic increments (`ZINCRBY`) under 10 concurrent workers x 100 increments = exactly 1000.
-- Memcached distributed locking (`add`) under 10 concurrent workers x 100 increments = exactly 1000 (0 lost increments).
-- Memcached naive no-lock experiment = demonstrates lost increments deficit (e.g., 407 lost increments).
-- Rate Limiter = 105 rapid requests per user resulting in exactly 100 HTTP 200s and 5 HTTP 429s.
+The consistency suite verifies:
+- **Redis Leaderboard**: Atomic increments (`ZINCRBY`) under 10 concurrent workers $\times$ 100 increments = exactly 1000.
+- **Memcached Leaderboard (With Lock)**: Distributed locking via `add` under 10 concurrent workers $\times$ 100 increments = exactly 1000 (0 lost increments).
+- **Memcached Leaderboard (No Lock)**: Demonstrates race condition deficit ($< 1000$, resulting in hundreds of lost increments).
+- **Distributed Rate Limiter**: 105 rapid requests per user resulting in exactly 100 HTTP 200s and 5 HTTP 429s.
 
-Execute inside the container:
+**To run the test:**
+
+On Windows PowerShell:
+```powershell
+.\test_consistency.ps1
+```
+*(or `powershell -ExecutionPolicy Bypass -File test_consistency.ps1` or run `test_consistency.bat`)*
+
+On Linux / macOS:
+```bash
+./test_consistency.sh
+```
+
+Or via direct Docker command:
 ```bash
 docker exec caching-app python app/scripts/test_consistency.py
 ```
-Output results are written to `results/consistency_results.json`.
+
+**Expected terminal output upon completion:**
+```text
+Consistency test completed successfully! Results written to results/consistency_results.json
+```
+*(Note: The above text is the completion status message displayed by the script, not a command to type).*
+
 
 ---
 

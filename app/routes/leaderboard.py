@@ -25,6 +25,37 @@ async def get_leaderboard(
         top_products=[LeaderboardItem(**item) for item in items]
     )
 
+@router.get("/products/{product_id}/views")
+async def get_product_views(
+    product_id: int,
+    response: Response,
+    cache: BaseCacheBackend = Depends(get_cache_backend),
+    backend_name: str = Depends(get_backend_name),
+):
+    """
+    Get exact view count for a specific product.
+    """
+    response.headers["X-Cache-Backend"] = backend_name
+    views = await cache.get_product_views(product_id)
+    return {
+        "product_id": product_id,
+        "views": views,
+        "backend": backend_name
+    }
+
+@router.post("/leaderboard/reset")
+async def reset_leaderboard(
+    response: Response,
+    cache: BaseCacheBackend = Depends(get_cache_backend),
+    backend_name: str = Depends(get_backend_name),
+):
+    """
+    Reset leaderboard data for testing and benchmarks.
+    """
+    response.headers["X-Cache-Backend"] = backend_name
+    await cache.reset_leaderboard()
+    return {"status": "reset", "backend": backend_name}
+
 @router.post("/products/{product_id}/view")
 async def increment_product_view(
     product_id: int,

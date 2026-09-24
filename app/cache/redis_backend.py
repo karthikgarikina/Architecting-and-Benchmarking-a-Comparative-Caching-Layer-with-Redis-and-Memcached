@@ -85,6 +85,17 @@ class RedisCacheBackend(BaseCacheBackend):
             results.append({"product_id": int(pid), "views": int(score)})
         return results
 
+    async def get_product_views(self, product_id: int) -> int:
+        client = await self._ensure_client()
+        key = "leaderboard:views"
+        score = await client.zscore(key, str(product_id))
+        return int(score) if score is not None else 0
+
+    async def reset_leaderboard(self) -> bool:
+        client = await self._ensure_client()
+        await client.delete("leaderboard:views")
+        return True
+
     # 3. Distributed Rate Limiting using Lua script (atomic INCR + EXPIRE)
     async def check_rate_limit(self, user_id: str, limit: int = 100, window: int = 60) -> Tuple[bool, int]:
         client = await self._ensure_client()

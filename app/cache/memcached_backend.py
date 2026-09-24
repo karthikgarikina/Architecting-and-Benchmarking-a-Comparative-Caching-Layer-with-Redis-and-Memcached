@@ -163,6 +163,24 @@ class MemcachedCacheBackend(BaseCacheBackend):
             logger.error("Error parsing Memcached leaderboard: %s", e)
             return []
 
+    async def get_product_views(self, product_id: int) -> int:
+        client = await self._ensure_client()
+        lb_key = b"leaderboard:views"
+        raw = await client.get(lb_key)
+        if not raw:
+            return 0
+        try:
+            board = json.loads(raw.decode("utf-8"))
+            return int(board.get(str(product_id), 0))
+        except Exception:
+            return 0
+
+    async def reset_leaderboard(self) -> bool:
+        client = await self._ensure_client()
+        await client.delete(b"leaderboard:views")
+        await client.delete(b"lock:leaderboard:views")
+        return True
+
     # 3. Distributed Rate Limiting using atomic `incr` and safe `add` initialization
     async def check_rate_limit(self, user_id: str, limit: int = 100, window: int = 60) -> Tuple[bool, int]:
         client = await self._ensure_client()
