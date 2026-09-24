@@ -322,6 +322,10 @@ The `submission.json` file in the root directory summarizes the benchmark and co
   }
 }
 ```
+---
+## Video Demo
+
+https://youtu.be/9a0VSNQjmbY
 
 ---
 
